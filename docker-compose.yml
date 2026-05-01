@@ -1,0 +1,76 @@
+version: '3.9'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  producer:
+    build:
+      context: .
+      dockerfile: apps/producer/Dockerfile
+    ports:
+      - '3001:3000'
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -f http://localhost:3000/api/events/health || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  consumer:
+    build:
+      context: .
+      dockerfile: apps/consumer/Dockerfile
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  notification:
+    build:
+      context: .
+      dockerfile: apps/notification/Dockerfile
+
+    env_file:
+      - .env
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
+    dns: 
+      - 8.8.8.8
+      - 1.1.1.1
+    environment:
+      NODE_OPTIONS: '--dns-result-order=ipv4first'
+
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+    command: node dist/apps/notification/src/main
